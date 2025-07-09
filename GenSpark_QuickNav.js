@@ -1,288 +1,436 @@
 // ==UserScript==
-// @name         GenSpark 简洁消息导航
-// @namespace    http://tampermonkey.net/
-// @version      1.1
-// @description  为GenSpark AI对话添加蓝色背景和简洁的导航按钮
+// @name         Genspark 快捷导航
+// @namespace    https://github.com/your-username/genspark-quicknav
+// @version      1.2
+// @description  为 genspark.ai 对话页面添加快捷导航功能，让用户能够快速跳转到任何问题和回答
 // @author       schweigen
 // @match        https://www.genspark.ai/agents*
+// @match        https://genspark.ai/agents*
 // @grant        none
 // @run-at       document-start
-// @license      MIT
 // ==/UserScript==
 
 (function() {
     'use strict';
-
-    let currentMessageIndex = 0;
-    let userMessages = [];
-    let navigationPanel = null;
-
-    // 添加CSS样式
-    function addStyles() {
+    
+    // 配置选项
+    const CONFIG = {
+        maxTitleLength: 50,
+        refreshInterval: 2000,
+        animationDuration: 300,
+        keyboardShortcut: 'KeyN' // Ctrl+N 打开/关闭导航面板
+    };
+    
+    // 等待页面完全加载
+    function waitForElement(selector, timeout = 10000) {
+        return new Promise((resolve, reject) => {
+            const startTime = Date.now();
+            
+            function check() {
+                const element = document.querySelector(selector);
+                if (element) {
+                    resolve(element);
+                    return;
+                }
+                
+                if (Date.now() - startTime > timeout) {
+                    reject(new Error(`Element ${selector} not found within ${timeout}ms`));
+                    return;
+                }
+                
+                setTimeout(check, 100);
+            }
+            
+            check();
+        });
+    }
+    
+    // 创建导航面板
+    function createNavigationPanel() {
+        const nav = document.createElement('div');
+        nav.id = 'genspark-quicknav';
+        nav.innerHTML = `
+            <div class="quicknav-header">
+                <span class="quicknav-title">快捷导航</span>
+                <div class="quicknav-controls">
+                    <button class="quicknav-refresh" title="刷新导航">⟳</button>
+                    <button class="quicknav-toggle" title="折叠/展开">−</button>
+                    <button class="quicknav-close" title="关闭">×</button>
+                </div>
+            </div>
+            <div class="quicknav-content">
+                <div class="quicknav-list"></div>
+            </div>
+        `;
+        
+        // 创建收起状态的小方块
+        const miniNav = document.createElement('div');
+        miniNav.id = 'genspark-quicknav-mini';
+        miniNav.innerHTML = `
+            <div class="quicknav-mini-content">导航</div>
+        `;
+        miniNav.style.display = 'none';
+        
+        // 添加样式
         const style = document.createElement('style');
         style.textContent = `
-            /* 用户消息蓝色背景 */
-            .conversation-statement.user .bubble {
-                background-color: #e3f2fd !important;
-            }
-
-            /* 简洁导航按钮容器 */
-            #message-navigator {
+            #genspark-quicknav {
                 position: fixed;
                 top: 50%;
-                right: 20px;
+                left: 20px;
                 transform: translateY(-50%);
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                gap: 6px;
-                z-index: 9999;
+                width: 280px;
+                max-height: 60vh;
+                background: #ffffff;
+                border: 1px solid #e0e0e6;
+                border-radius: 8px;
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+                z-index: 10000;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                font-size: 13px;
+                overflow: hidden;
+                transition: all ${CONFIG.animationDuration}ms ease;
             }
-
-            .nav-button {
-                width: 40px;
-                height: 40px;
-                background: rgba(255, 255, 255, 0.95);
-                border: 1px solid #e0e0e0;
-                border-radius: 50%;
+            
+            #genspark-quicknav.collapsed {
+                display: none;
+            }
+            
+            #genspark-quicknav.hidden {
+                display: none;
+            }
+            
+            #genspark-quicknav-mini {
+                position: fixed;
+                top: 50%;
+                left: 20px;
+                transform: translateY(-50%);
+                width: 60px;
+                height: 60px;
+                background: #ffffff;
+                border: 1px solid #e0e0e6;
+                border-radius: 8px;
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+                z-index: 10000;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                cursor: pointer;
+                transition: all ${CONFIG.animationDuration}ms ease;
+            }
+            
+            #genspark-quicknav-mini:hover {
+                background: #f8f9fa;
+                transform: translateY(-50%) scale(1.05);
+            }
+            
+            #genspark-quicknav-mini.hidden {
+                display: none;
+            }
+            
+            .quicknav-mini-content {
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                cursor: pointer;
-                transition: all 0.2s ease;
-                backdrop-filter: blur(10px);
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-                font-size: 16px;
-                color: #1976d2;
-                font-weight: bold;
-                user-select: none;
-            }
-
-            .nav-button:hover {
-                background: rgba(25, 118, 210, 0.1);
-                transform: scale(1.1);
-                box-shadow: 0 4px 12px rgba(25, 118, 210, 0.2);
-                border-color: #1976d2;
-            }
-
-            .nav-button:active {
-                transform: scale(0.95);
-                background: rgba(25, 118, 210, 0.2);
-            }
-
-            .nav-button:disabled {
-                background: rgba(200, 200, 200, 0.7);
-                color: #999;
-                cursor: not-allowed;
-                transform: none;
-                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-            }
-
-            .nav-button:disabled:hover {
-                transform: none;
-                background: rgba(200, 200, 200, 0.7);
-                border-color: #e0e0e0;
-            }
-
-            /* 计数器显示 */
-            .nav-counter {
-                background: rgba(255, 255, 255, 0.95);
-                border: 1px solid #e0e0e0;
-                border-radius: 12px;
-                padding: 4px 8px;
+                width: 100%;
+                height: 100%;
                 font-size: 12px;
-                font-weight: bold;
-                color: #1976d2;
-                backdrop-filter: blur(10px);
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-                min-width: 40px;
+                font-weight: 600;
+                color: #333;
+                writing-mode: vertical-lr;
+                text-orientation: mixed;
+            }
+            
+            .quicknav-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 8px 12px;
+                background: #f8f9fa;
+                border-bottom: 1px solid #e0e0e6;
+            }
+            
+            .quicknav-title {
+                font-weight: 600;
+                color: #333;
+            }
+            
+            .quicknav-controls {
+                display: flex;
+                gap: 8px;
+            }
+            
+            .quicknav-controls button {
+                background: none;
+                border: none;
+                padding: 2px 6px;
+                border-radius: 3px;
+                cursor: pointer;
+                font-size: 12px;
+                color: #666;
+                transition: background-color 0.2s;
+            }
+            
+            .quicknav-controls button:hover {
+                background-color: #e9ecef;
+                color: #333;
+            }
+            
+            .quicknav-content {
+                max-height: calc(60vh - 50px);
+                overflow-y: auto;
+            }
+            
+            .quicknav-list {
+                padding: 4px 0;
+            }
+            
+            .quicknav-item {
+                display: flex;
+                align-items: center;
+                padding: 4px 12px;
+                cursor: pointer;
+                border-left: 3px solid transparent;
+                transition: all 0.2s;
+                line-height: 1.3;
+            }
+            
+            .quicknav-item:hover {
+                background-color: #f8f9fa;
+                border-left-color: #007bff;
+            }
+            
+            .quicknav-item.user {
+                border-left-color: #28a745;
+            }
+            
+            .quicknav-item.assistant {
+                border-left-color: #17a2b8;
+                margin-left: 12px;
+            }
+            
+            .quicknav-item-icon {
+                width: 12px;
+                height: 12px;
+                margin-right: 6px;
+                border-radius: 50%;
+                flex-shrink: 0;
+            }
+            
+            .quicknav-item.user .quicknav-item-icon {
+                background-color: #28a745;
+            }
+            
+            .quicknav-item.assistant .quicknav-item-icon {
+                background-color: #17a2b8;
+            }
+            
+            .quicknav-item-text {
+                flex: 1;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                color: #333;
+                font-size: 12px;
+            }
+            
+            .quicknav-item-index {
+                font-size: 10px;
+                color: #666;
+                margin-left: 6px;
+                flex-shrink: 0;
+            }
+            
+            .quicknav-empty {
+                padding: 12px;
                 text-align: center;
+                color: #666;
+                font-size: 12px;
             }
-
-            /* 当前消息高亮 */
-            .conversation-statement.user.current-message .bubble {
-                background-color: #bbdefb !important;
-                border: 2px solid #1976d2 !important;
-                transform: scale(1.02);
-                transition: all 0.3s ease;
+            
+            /* 滚动条样式 */
+            .quicknav-content::-webkit-scrollbar {
+                width: 4px;
             }
-
-            /* 添加脉冲动画 */
-            @keyframes pulse {
-                0% { transform: scale(1); }
-                50% { transform: scale(1.05); }
-                100% { transform: scale(1); }
+            
+            .quicknav-content::-webkit-scrollbar-track {
+                background: #f8f9fa;
+            }
+            
+            .quicknav-content::-webkit-scrollbar-thumb {
+                background: #c1c1c1;
+                border-radius: 2px;
+            }
+            
+            .quicknav-content::-webkit-scrollbar-thumb:hover {
+                background: #a8a8a8;
             }
         `;
+        
         document.head.appendChild(style);
+        document.body.appendChild(nav);
+        document.body.appendChild(miniNav);
+        
+        return { nav, miniNav };
     }
-
-    // 创建导航按钮
-    function createNavigationButtons() {
-        if (navigationPanel) return;
-
-        navigationPanel = document.createElement('div');
-        navigationPanel.id = 'message-navigator';
-        navigationPanel.innerHTML = `
-            <button class="nav-button" id="prev-message" title="上一个问题 (Alt+↑)">↑</button>
-            <div class="nav-counter" id="message-counter">0/0</div>
-            <button class="nav-button" id="next-message" title="下一个问题 (Alt+↓)">↓</button>
-        `;
-
-        document.body.appendChild(navigationPanel);
-        setupEventListeners();
+    
+    // 提取消息文本
+    function extractMessageText(element) {
+        const contentElement = element.querySelector('.content');
+        if (!contentElement) return '';
+        
+        // 尝试从code标签中提取（用户消息）
+        const codeElement = contentElement.querySelector('code');
+        if (codeElement) {
+            return codeElement.textContent.trim();
+        }
+        
+        // 尝试从markdown-viewer中提取（AI消息）
+        const markdownElement = contentElement.querySelector('.markdown-viewer');
+        if (markdownElement) {
+            return markdownElement.textContent.trim();
+        }
+        
+        // 备用方案
+        return contentElement.textContent.trim();
     }
-
-    // 设置事件监听器
-    function setupEventListeners() {
-        const prevBtn = document.getElementById('prev-message');
-        const nextBtn = document.getElementById('next-message');
-
-        // 简单的点击事件
-        prevBtn.onclick = function() {
-            console.log('点击上一个按钮');
-            goToPreviousMessage();
-        };
-
-        nextBtn.onclick = function() {
-            console.log('点击下一个按钮');
-            goToNextMessage();
-        };
-
+    
+    // 扫描并更新导航列表
+    function updateNavigationList() {
+        const navList = document.querySelector('.quicknav-list');
+        if (!navList) return;
+        
+        const messages = document.querySelectorAll('.conversation-statement');
+        
+        if (messages.length === 0) {
+            navList.innerHTML = '<div class="quicknav-empty">暂无对话消息</div>';
+            return;
+        }
+        
+        navList.innerHTML = '';
+        let userIndex = 1;
+        let assistantIndex = 1;
+        
+        messages.forEach((message, index) => {
+            const isUser = message.classList.contains('user');
+            const isAssistant = message.classList.contains('assistant');
+            
+            if (!isUser && !isAssistant) return;
+            
+            const text = extractMessageText(message);
+            if (!text) return;
+            
+            const item = document.createElement('div');
+            item.className = `quicknav-item ${isUser ? 'user' : 'assistant'}`;
+            
+            const truncatedText = text.length > CONFIG.maxTitleLength 
+                ? text.substring(0, CONFIG.maxTitleLength) + '...' 
+                : text;
+            
+            const displayIndex = isUser ? userIndex++ : assistantIndex++;
+            const prefix = isUser ? '问' : '答';
+            
+            item.innerHTML = `
+                <div class="quicknav-item-icon"></div>
+                <div class="quicknav-item-text">${truncatedText}</div>
+                <div class="quicknav-item-index">${prefix}${displayIndex}</div>
+            `;
+            
+            // 添加点击事件
+            item.addEventListener('click', () => {
+                message.scrollIntoView({ 
+                    behavior: 'smooth', 
+                    block: 'center' 
+                });
+                
+                // 高亮显示目标消息
+                message.style.transition = 'background-color 0.5s ease';
+                message.style.backgroundColor = '#fff3cd';
+                setTimeout(() => {
+                    message.style.backgroundColor = '';
+                }, 2000);
+            });
+            
+            navList.appendChild(item);
+        });
+    }
+    
+    // 初始化导航面板
+    function initNavigationPanel() {
+        const { nav, miniNav } = createNavigationPanel();
+        let isCollapsed = false;
+        let isHidden = false;
+        
+        // 绑定控制按钮事件
+        const refreshBtn = nav.querySelector('.quicknav-refresh');
+        const toggleBtn = nav.querySelector('.quicknav-toggle');
+        const closeBtn = nav.querySelector('.quicknav-close');
+        
+        refreshBtn.addEventListener('click', updateNavigationList);
+        
+        toggleBtn.addEventListener('click', () => {
+            isCollapsed = !isCollapsed;
+            nav.classList.toggle('collapsed', isCollapsed);
+            miniNav.style.display = isCollapsed ? 'block' : 'none';
+            toggleBtn.textContent = isCollapsed ? '+' : '−';
+        });
+        
+        closeBtn.addEventListener('click', () => {
+            isHidden = !isHidden;
+            nav.classList.toggle('hidden', isHidden);
+            miniNav.classList.toggle('hidden', isHidden);
+        });
+        
+        // 点击小方块展开导航
+        miniNav.addEventListener('click', () => {
+            isCollapsed = false;
+            nav.classList.remove('collapsed');
+            miniNav.style.display = 'none';
+            toggleBtn.textContent = '−';
+        });
+        
         // 键盘快捷键
         document.addEventListener('keydown', (e) => {
-            if (e.altKey) {
-                if (e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    goToPreviousMessage();
-                } else if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    goToNextMessage();
+            if (e.ctrlKey && e.code === CONFIG.keyboardShortcut) {
+                e.preventDefault();
+                if (isHidden) {
+                    isHidden = false;
+                    nav.classList.remove('hidden');
+                    miniNav.classList.remove('hidden');
+                } else {
+                    isHidden = true;
+                    nav.classList.add('hidden');
+                    miniNav.classList.add('hidden');
                 }
             }
         });
+        
+        // 定期刷新导航列表
+        setInterval(updateNavigationList, CONFIG.refreshInterval);
+        
+        // 初始更新
+        updateNavigationList();
     }
-
-    // 更新用户消息列表
-    function updateUserMessages() {
-        const newUserMessages = document.querySelectorAll('.conversation-statement.user');
-
-        if (newUserMessages.length !== userMessages.length) {
-            userMessages = Array.from(newUserMessages);
-            console.log('找到用户消息数量:', userMessages.length);
-
-            if (userMessages.length > 0) {
-                currentMessageIndex = userMessages.length - 1;
-            }
-
-            updateNavigationState();
-        }
-    }
-
-    // 更新导航状态
-    function updateNavigationState() {
-        if (!navigationPanel) return;
-
-        const counter = document.getElementById('message-counter');
-        const prevBtn = document.getElementById('prev-message');
-        const nextBtn = document.getElementById('next-message');
-
-        if (userMessages.length === 0) {
-            counter.textContent = '0/0';
-            prevBtn.disabled = true;
-            nextBtn.disabled = true;
-            return;
-        }
-
-        counter.textContent = `${currentMessageIndex + 1}/${userMessages.length}`;
-        prevBtn.disabled = currentMessageIndex === 0;
-        nextBtn.disabled = currentMessageIndex === userMessages.length - 1;
-
-        console.log(`当前消息索引: ${currentMessageIndex + 1}/${userMessages.length}`);
-
-        // 移除之前的高亮
-        document.querySelectorAll('.conversation-statement.user.current-message').forEach(el => {
-            el.classList.remove('current-message');
-        });
-
-        // 高亮当前消息
-        if (userMessages[currentMessageIndex]) {
-            userMessages[currentMessageIndex].classList.add('current-message');
-        }
-    }
-
-    // 滚动到指定消息
-    function scrollToMessage(index) {
-        if (index < 0 || index >= userMessages.length) return;
-
-        const targetMessage = userMessages[index];
-        console.log('滚动到消息:', index + 1);
-
-        targetMessage.scrollIntoView({
-            behavior: 'smooth',
-            block: 'center',
-            inline: 'nearest'
-        });
-
-        // 添加脉冲效果
-        setTimeout(() => {
-            targetMessage.style.animation = 'pulse 0.5s ease-in-out';
-            setTimeout(() => {
-                targetMessage.style.animation = '';
-            }, 500);
-        }, 300);
-    }
-
-    // 上一个消息
-    function goToPreviousMessage() {
-        console.log('执行上一个消息');
-        if (currentMessageIndex > 0) {
-            currentMessageIndex--;
-            scrollToMessage(currentMessageIndex);
-            updateNavigationState();
-        }
-    }
-
-    // 下一个消息
-    function goToNextMessage() {
-        console.log('执行下一个消息');
-        if (currentMessageIndex < userMessages.length - 1) {
-            currentMessageIndex++;
-            scrollToMessage(currentMessageIndex);
-            updateNavigationState();
-        }
-    }
-
-    // 观察DOM变化
-    function observeConversationChanges() {
-        const observer = new MutationObserver(() => {
-            updateUserMessages();
-        });
-
-        const targetNode = document.body || document.documentElement;
-        observer.observe(targetNode, {
-            childList: true,
-            subtree: true
-        });
-    }
-
+    
     // 主函数
-    function main() {
-        addStyles();
-
-        setTimeout(() => {
-            createNavigationButtons();
-            updateUserMessages();
-            observeConversationChanges();
-            console.log('GenSpark 简洁消息导航器已启动');
-        }, 1000);
+    async function main() {
+        try {
+            // 等待对话容器加载
+            await waitForElement('.conversation-wrapper');
+            
+            // 稍微延迟以确保内容完全加载
+            setTimeout(() => {
+                initNavigationPanel();
+            }, 1000);
+            
+        } catch (error) {
+            console.error('Genspark QuickNav: 初始化失败', error);
+        }
     }
-
-    // 页面加载完成检查
+    
+    // 页面加载完成后启动
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', main);
     } else {
         main();
     }
-
+    
 })();
