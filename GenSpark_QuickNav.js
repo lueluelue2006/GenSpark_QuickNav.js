@@ -1,13 +1,16 @@
 // ==UserScript==
 // @name         Genspark 快捷导航
-// @namespace    https://github.com/your-username/genspark-quicknav
-// @version      1.6
-// @description  为 genspark.ai 对话页面添加快捷导航功能和代码折叠功能，支持上下箭头快速跳转消息，双击代码块展开/收起，让用户能够快速跳转到任何问题和回答
+// @namespace    http://tampermonkey.net/
+// @version      2.1
+// @description  为 genspark.ai 对话页面添加快捷导航、编辑按钮、代码折叠和箭头导航功能
 // @author       schweigen
+// @license      MIT
 // @match        https://www.genspark.ai/agents*
 // @match        https://genspark.ai/agents*
 // @grant        none
 // @run-at       document-start
+// @downloadURL  https://update.greasyfork.org/scripts/538068/Genspark%20%E5%BF%AB%E6%8D%B7%E5%AF%BC%E8%88%AA.user.js
+// @updateURL    https://update.greasyfork.org/scripts/538068/Genspark%20%E5%BF%AB%E6%8D%B7%E5%AF%BC%E8%88%AA.meta.js
 // ==/UserScript==
 
 (function() {
@@ -55,7 +58,6 @@
                 <div class="quicknav-controls">
                     <button class="quicknav-refresh" title="刷新导航">⟳</button>
                     <button class="quicknav-toggle" title="折叠/展开">−</button>
-                    <button class="quicknav-close" title="关闭">×</button>
                 </div>
             </div>
             <div class="quicknav-content">
@@ -375,6 +377,105 @@
             .quicknav-content::-webkit-scrollbar-thumb:hover {
                 background: linear-gradient(135deg, #9ca3af 0%, #6b7280 100%);
             }
+
+            /* 编辑按钮样式 */
+            .genspark-edit-button {
+                position: absolute;
+                right: -80px;
+                top: 50%;
+                transform: translateY(-50%);
+                background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
+                font-weight: 500;
+                cursor: pointer;
+                transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                z-index: 100;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            }
+
+            .genspark-edit-button:hover {
+                transform: translateY(-50%) scale(1.05);
+                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+                background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+            }
+
+            .genspark-edit-button:active {
+                transform: translateY(-50%) scale(0.98);
+            }
+
+            .conversation-statement.user {
+                position: relative;
+            }
+
+            .genspark-edit-button svg {
+                width: 16px;
+                height: 16px;
+            }
+
+            /* 代码折叠样式 */
+            .code-collapse-wrapper {
+                position: relative;
+            }
+
+            .code-collapse-toggle {
+                position: absolute;
+                right: 60px;
+                top: 8px;
+                background: rgba(255, 255, 255, 0.9);
+                border: 1px solid #d1d5db;
+                border-radius: 4px;
+                padding: 4px 8px;
+                cursor: pointer;
+                font-size: 12px;
+                color: #374151;
+                z-index: 1000;
+                transition: all 0.2s ease;
+                user-select: none;
+            }
+
+            .code-collapse-toggle:hover {
+                background: #f3f4f6;
+                border-color: #9ca3af;
+            }
+
+            .code-collapsed {
+                max-height: ${CONFIG.codeCollapseLine * 1.5}em;
+                overflow: hidden;
+                position: relative;
+                cursor: pointer;
+            }
+
+            .code-collapsed::after {
+                content: '';
+                position: absolute;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                height: 3em;
+                background: linear-gradient(transparent, rgba(255, 255, 255, 0.9));
+                pointer-events: none;
+            }
+
+            .code-collapsed:hover::after {
+                background: linear-gradient(transparent, rgba(240, 248, 255, 0.95));
+            }
+
+            .code-expanded {
+                max-height: none;
+                overflow: visible;
+                cursor: pointer;
+            }
+
+            .code-expanded::after {
+                display: none;
+            }
         `;
 
         document.head.appendChild(style);
@@ -405,6 +506,98 @@
 
         // 备用方案
         return contentElement.textContent.trim();
+    }
+
+    // 添加编辑按钮到用户消息
+    function addEditButtons() {
+        const userMessages = document.querySelectorAll('.conversation-statement.user:not(.has-edit-button)');
+
+        userMessages.forEach(message => {
+            // 标记已处理
+            message.classList.add('has-edit-button');
+
+            // 创建编辑按钮
+            const editButton = document.createElement('button');
+            editButton.className = 'genspark-edit-button';
+            editButton.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+                </svg>
+                编辑
+            `;
+
+            // 直接添加到消息容器上
+            message.style.position = 'relative';
+            message.appendChild(editButton);
+
+            // 点击编辑按钮的处理
+            editButton.addEventListener('click', () => {
+                // 查找编辑按钮（可能是隐藏的）
+                const hiddenEditBtn = message.querySelector('.message-action-icon');
+                if (hiddenEditBtn) {
+                    hiddenEditBtn.click();
+                } else {
+                    // 如果没有找到编辑按钮，尝试让内容可编辑
+                    const bubble = message.querySelector('.bubble');
+                    if (bubble) {
+                        bubble.setAttribute('contenteditable', 'true');
+                        bubble.focus();
+                    }
+                }
+            });
+        });
+    }
+
+    // 消息导航功能
+    function getCurrentMessageIndex() {
+        const messages = document.querySelectorAll('.conversation-statement');
+        const viewportHeight = window.innerHeight;
+        const viewportCenter = window.scrollY + viewportHeight / 2;
+
+        let closestIndex = 0;
+        let closestDistance = Infinity;
+
+        messages.forEach((message, index) => {
+            const messageRect = message.getBoundingClientRect();
+            const messageCenter = window.scrollY + messageRect.top + messageRect.height / 2;
+            const distance = Math.abs(messageCenter - viewportCenter);
+
+            if (distance < closestDistance) {
+                closestDistance = distance;
+                closestIndex = index;
+            }
+        });
+
+        return closestIndex;
+    }
+
+    function navigateToMessage(direction) {
+        const messages = document.querySelectorAll('.conversation-statement');
+        if (messages.length === 0) return;
+
+        const currentIndex = getCurrentMessageIndex();
+        let targetIndex;
+
+        if (direction === 'prev') {
+            targetIndex = Math.max(0, currentIndex - 1);
+        } else {
+            targetIndex = Math.min(messages.length - 1, currentIndex + 1);
+        }
+
+        const targetMessage = messages[targetIndex];
+        if (targetMessage) {
+            targetMessage.scrollIntoView({
+                behavior: 'smooth',
+                block: 'center'
+            });
+
+            // 高亮显示目标消息
+            targetMessage.style.transition = 'background-color 0.5s ease';
+            targetMessage.style.backgroundColor = '#fff3cd';
+            setTimeout(() => {
+                targetMessage.style.backgroundColor = '';
+            }, 2000);
+        }
     }
 
     // 扫描并更新导航列表
@@ -465,180 +658,13 @@
 
             navList.appendChild(item);
         });
-    }
 
-    // 消息导航功能
-    function getCurrentMessageIndex() {
-        const messages = document.querySelectorAll('.conversation-statement');
-        const viewportHeight = window.innerHeight;
-        const viewportCenter = window.scrollY + viewportHeight / 2;
-
-        let closestIndex = 0;
-        let closestDistance = Infinity;
-
-        messages.forEach((message, index) => {
-            const messageRect = message.getBoundingClientRect();
-            const messageCenter = window.scrollY + messageRect.top + messageRect.height / 2;
-            const distance = Math.abs(messageCenter - viewportCenter);
-
-            if (distance < closestDistance) {
-                closestDistance = distance;
-                closestIndex = index;
-            }
-        });
-
-        return closestIndex;
-    }
-
-    function navigateToMessage(direction) {
-        const messages = document.querySelectorAll('.conversation-statement');
-        if (messages.length === 0) return;
-
-        const currentIndex = getCurrentMessageIndex();
-        let targetIndex;
-
-        if (direction === 'prev') {
-            targetIndex = Math.max(0, currentIndex - 1);
-        } else {
-            targetIndex = Math.min(messages.length - 1, currentIndex + 1);
-        }
-
-        const targetMessage = messages[targetIndex];
-        if (targetMessage) {
-            targetMessage.scrollIntoView({
-                behavior: 'smooth',
-                block: 'center'
-            });
-
-            // 高亮显示目标消息
-            targetMessage.style.transition = 'background-color 0.5s ease';
-            targetMessage.style.backgroundColor = '#fff3cd';
-            setTimeout(() => {
-                targetMessage.style.backgroundColor = '';
-            }, 2000);
-        }
-    }
-
-    // 初始化导航面板
-    function initNavigationPanel() {
-        const { nav, miniNav, prevBtn, nextBtn } = createNavigationPanel();
-        let isCollapsed = true;  // 默认折叠状态
-        let isHidden = false;
-
-        // 设置初始状态
-        nav.classList.add('collapsed');
-        miniNav.style.display = 'block';
-
-        // 绑定控制按钮事件
-        const refreshBtn = nav.querySelector('.quicknav-refresh');
-        const toggleBtn = nav.querySelector('.quicknav-toggle');
-        const closeBtn = nav.querySelector('.quicknav-close');
-
-        refreshBtn.addEventListener('click', updateNavigationList);
-
-        toggleBtn.addEventListener('click', () => {
-            isCollapsed = !isCollapsed;
-            nav.classList.toggle('collapsed', isCollapsed);
-            miniNav.style.display = isCollapsed ? 'block' : 'none';
-            toggleBtn.textContent = isCollapsed ? '+' : '−';
-        });
-
-        closeBtn.addEventListener('click', () => {
-            isHidden = !isHidden;
-            nav.classList.toggle('hidden', isHidden);
-            miniNav.classList.toggle('hidden', isHidden);
-            prevBtn.classList.toggle('hidden', isHidden);
-            nextBtn.classList.toggle('hidden', isHidden);
-        });
-
-        // 点击小方块展开导航
-        miniNav.addEventListener('click', () => {
-            isCollapsed = false;
-            nav.classList.remove('collapsed');
-            miniNav.style.display = 'none';
-            toggleBtn.textContent = '−';
-        });
-
-        // 上下导航按钮事件
-        prevBtn.addEventListener('click', () => {
-            navigateToMessage('prev');
-        });
-
-        nextBtn.addEventListener('click', () => {
-            navigateToMessage('next');
-        });
-
-        // 定期刷新导航列表
-        setInterval(updateNavigationList, CONFIG.refreshInterval);
-
-        // 初始更新
-        updateNavigationList();
+        // 同时更新编辑按钮
+        addEditButtons();
     }
 
     // 代码折叠功能
     function initCodeCollapse() {
-        // 添加代码折叠的样式
-        const codeStyle = document.createElement('style');
-        codeStyle.textContent = `
-            .code-collapse-wrapper {
-                position: relative;
-            }
-
-            .code-collapse-toggle {
-                position: absolute;
-                right: 32px;
-                top: 8px;
-                background: rgba(255, 255, 255, 0.9);
-                border: 1px solid #d1d5db;
-                border-radius: 4px;
-                padding: 4px 8px;
-                cursor: pointer;
-                font-size: 12px;
-                color: #374151;
-                z-index: 1000;
-                transition: all 0.2s ease;
-                user-select: none;
-            }
-
-            .code-collapse-toggle:hover {
-                background: #f3f4f6;
-                border-color: #9ca3af;
-            }
-
-            .code-collapsed {
-                max-height: ${CONFIG.codeCollapseLine * 1.5}em;
-                overflow: hidden;
-                position: relative;
-                cursor: pointer;
-            }
-
-            .code-collapsed::after {
-                content: '';
-                position: absolute;
-                bottom: 0;
-                left: 0;
-                right: 0;
-                height: 3em;
-                background: linear-gradient(transparent, rgba(255, 255, 255, 0.9));
-                pointer-events: none;
-            }
-
-            .code-collapsed:hover::after {
-                background: linear-gradient(transparent, rgba(240, 248, 255, 0.95));
-            }
-
-            .code-expanded {
-                max-height: none;
-                overflow: visible;
-                cursor: pointer;
-            }
-
-            .code-expanded::after {
-                display: none;
-            }
-        `;
-        document.head.appendChild(codeStyle);
-
         // 处理代码块折叠
         function processCodeBlocks() {
             const codeBlocks = document.querySelectorAll('pre code.hljs');
@@ -728,6 +754,53 @@
             childList: true,
             subtree: true
         });
+    }
+
+    // 初始化导航面板
+    function initNavigationPanel() {
+        const { nav, miniNav, prevBtn, nextBtn } = createNavigationPanel();
+        let isCollapsed = true;  // 默认折叠状态
+        let isHidden = false;
+
+        // 设置初始状态
+        nav.classList.add('collapsed');
+        miniNav.style.display = 'block';
+
+        // 绑定控制按钮事件
+        const refreshBtn = nav.querySelector('.quicknav-refresh');
+        const toggleBtn = nav.querySelector('.quicknav-toggle');
+
+        refreshBtn.addEventListener('click', updateNavigationList);
+
+        toggleBtn.addEventListener('click', () => {
+            isCollapsed = !isCollapsed;
+            nav.classList.toggle('collapsed', isCollapsed);
+            miniNav.style.display = isCollapsed ? 'block' : 'none';
+            toggleBtn.textContent = isCollapsed ? '+' : '−';
+        });
+
+        // 点击小方块展开导航
+        miniNav.addEventListener('click', () => {
+            isCollapsed = false;
+            nav.classList.remove('collapsed');
+            miniNav.style.display = 'none';
+            toggleBtn.textContent = '−';
+        });
+
+        // 上下导航按钮事件
+        prevBtn.addEventListener('click', () => {
+            navigateToMessage('prev');
+        });
+
+        nextBtn.addEventListener('click', () => {
+            navigateToMessage('next');
+        });
+
+        // 定期刷新导航列表
+        setInterval(updateNavigationList, CONFIG.refreshInterval);
+
+        // 初始更新
+        updateNavigationList();
     }
 
     // 主函数
