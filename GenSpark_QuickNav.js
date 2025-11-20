@@ -1,16 +1,14 @@
 // ==UserScript==
-// @name         Genspark 快捷导航
+// @name         Genspark 快捷导航+对话导出
 // @namespace    http://tampermonkey.net/
-// @version      2.1
-// @description  为 genspark.ai 对话页面添加快捷导航、编辑按钮、代码折叠和箭头导航功能
-// @author       schweigen
+// @version      3.1.4
+// @description  为 genspark.ai 对话页面添加快捷导航、编辑按钮、代码折叠和箭头导航功能。已修改编辑按钮逻辑为点击第二个图标。
+// @author       schweigen (Modified)
 // @license      MIT
 // @match        https://www.genspark.ai/agents*
 // @match        https://genspark.ai/agents*
 // @grant        none
 // @run-at       document-start
-// @downloadURL  https://update.greasyfork.org/scripts/538068/Genspark%20%E5%BF%AB%E6%8D%B7%E5%AF%BC%E8%88%AA.user.js
-// @updateURL    https://update.greasyfork.org/scripts/538068/Genspark%20%E5%BF%AB%E6%8D%B7%E5%AF%BC%E8%88%AA.meta.js
 // ==/UserScript==
 
 (function() {
@@ -56,6 +54,13 @@
             <div class="quicknav-header">
                 <span class="quicknav-title">快捷导航</span>
                 <div class="quicknav-controls">
+                    <div class="export-dropdown">
+                        <button class="quicknav-export" title="导出对话">导出</button>
+                        <div class="export-menu">
+                            <button class="export-option" data-format="markdown">📝 Markdown</button>
+                            <button class="export-option" data-format="html">🌐 HTML</button>
+                        </div>
+                    </div>
                     <button class="quicknav-refresh" title="刷新导航">⟳</button>
                     <button class="quicknav-toggle" title="折叠/展开">−</button>
                 </div>
@@ -92,7 +97,7 @@
             #genspark-quicknav {
                 position: fixed;
                 top: 45%;
-                left: 16px;
+                left: 80px;
                 transform: translateY(-50%);
                 width: 320px;
                 max-height: 70vh;
@@ -120,7 +125,7 @@
             #genspark-quicknav-mini {
                 position: fixed;
                 top: 45%;
-                left: 16px;
+                left: 80px;
                 transform: translateY(-50%);
                 width: 48px;
                 height: 48px;
@@ -149,7 +154,7 @@
             #genspark-quicknav-prev,
             #genspark-quicknav-next {
                 position: fixed;
-                left: 16px;
+                left: 80px;
                 width: 32px;
                 height: 32px;
                 background: linear-gradient(135deg, #10b981 0%, #34d399 100%);
@@ -255,6 +260,64 @@
                 color: #1f2937;
                 transform: translateY(-1px);
                 box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            }
+
+            .quicknav-export {
+                background: linear-gradient(135deg, #10b981 0%, #34d399 100%) !important;
+                color: white !important;
+                border: none !important;
+                padding: 6px 12px !important;
+                min-width: auto !important;
+                font-size: 12px !important;
+                font-weight: 500 !important;
+            }
+
+            .quicknav-export:hover {
+                background: linear-gradient(135deg, #059669 0%, #10b981 100%) !important;
+                color: white !important;
+                transform: translateY(-1px) scale(1.05);
+            }
+
+            .export-dropdown {
+                position: relative;
+                display: inline-block;
+            }
+
+            .export-menu {
+                position: absolute;
+                top: 100%;
+                right: 0;
+                background: white;
+                border: 1px solid #d1d5db;
+                border-radius: 6px;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+                padding: 4px 0;
+                min-width: 120px;
+                z-index: 1000;
+                display: none;
+            }
+
+            .export-menu.show {
+                display: block;
+            }
+
+            .export-option {
+                width: 100%;
+                border: none;
+                background: transparent;
+                padding: 8px 12px;
+                text-align: left;
+                cursor: pointer;
+                font-size: 12px;
+                color: #374151;
+                transition: background-color 0.2s;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            }
+
+            .export-option:hover {
+                background: #f3f4f6;
             }
 
             .quicknav-content {
@@ -476,6 +539,32 @@
             .code-expanded::after {
                 display: none;
             }
+
+            /* 新建对话按钮样式增强 */
+            div[data-v-a21da7e8].icon {
+                width: 48px !important;
+                height: 48px !important;
+                padding: 12px !important;
+                transition: all 0.2s ease !important;
+                cursor: pointer !important;
+                border-radius: 8px !important;
+            }
+
+            div[data-v-a21da7e8].icon:hover {
+                transform: scale(1.1) !important;
+                background-color: rgba(0, 0, 0, 0.05) !important;
+                border-radius: 8px !important;
+            }
+
+            div[data-v-a21da7e8].icon svg {
+                width: 24px !important;
+                height: 24px !important;
+            }
+
+            /* 屏蔽 Try Mixture-of-Agents 提示框 */
+            .bubble.try_moa {
+                display: none !important;
+            }
         `;
 
         document.head.appendChild(style);
@@ -485,6 +574,247 @@
         document.body.appendChild(nextBtn);
 
         return { nav, miniNav, prevBtn, nextBtn };
+    }
+
+    // 提取对话内容
+    function extractConversationData() {
+        const messages = document.querySelectorAll('.conversation-statement');
+        const conversationData = [];
+
+        messages.forEach((message, index) => {
+            const isUser = message.classList.contains('user');
+            const isAssistant = message.classList.contains('assistant');
+
+            if (!isUser && !isAssistant) return;
+
+            let text = '';
+            if (isUser) {
+                // 用户消息从 code 标签中提取
+                const codeElement = message.querySelector('.content code');
+                text = codeElement ? codeElement.textContent.trim() : '';
+            } else if (isAssistant) {
+                // AI消息从 markdown-viewer 中提取
+                const markdownElement = message.querySelector('.markdown-viewer');
+                if (markdownElement) {
+                    // 获取原始HTML内容用于HTML导出
+                    const htmlContent = markdownElement.innerHTML;
+                    // 获取纯文本用于Markdown导出
+                    const textContent = markdownElement.textContent.trim();
+                    text = { htmlContent, textContent };
+                } else {
+                    text = '';
+                }
+            }
+
+            if (text) {
+                conversationData.push({
+                    index: index,
+                    type: isUser ? 'user' : 'assistant',
+                    content: text,
+                    timestamp: new Date().toISOString()
+                });
+            }
+        });
+
+        return conversationData;
+    }
+
+    // 格式化为Markdown
+    function formatToMarkdown(conversationData) {
+        const title = document.title || 'Genspark对话记录';
+        const timestamp = new Date().toLocaleString('zh-CN');
+
+        let markdown = `# ${title}\n\n`;
+        markdown += `**导出时间**: ${timestamp}\n\n`;
+        markdown += `---\n\n`;
+
+        conversationData.forEach((message, index) => {
+            if (message.type === 'user') {
+                markdown += `## 👤 用户 (${index + 1})\n\n`;
+                markdown += `${message.content}\n\n`;
+            } else if (message.type === 'assistant') {
+                markdown += `## 🤖 AI助手 (${index + 1})\n\n`;
+                // 对于AI消息，使用文本内容
+                const content = typeof message.content === 'object' ? message.content.textContent : message.content;
+                markdown += `${content}\n\n`;
+            }
+            markdown += `---\n\n`;
+        });
+
+        return markdown;
+    }
+
+    // 格式化为HTML
+    function formatToHTML(conversationData) {
+        const title = document.title || 'Genspark对话记录';
+        const timestamp = new Date().toLocaleString('zh-CN');
+
+        let html = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${title}</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .header { text-align: center; border-bottom: 2px solid #e5e7eb; padding-bottom: 20px; margin-bottom: 30px; }
+        .message { margin-bottom: 30px; border-radius: 8px; overflow: hidden; }
+        .user { background: #f0f9ff; border-left: 4px solid #10b981; }
+        .assistant { background: #f8fafc; border-left: 4px solid #3b82f6; }
+        .message-header { padding: 12px 16px; font-weight: 600; background: rgba(0,0,0,0.05); }
+        .message-content { padding: 16px; }
+        .user .message-header { color: #059669; }
+        .assistant .message-header { color: #2563eb; }
+        pre { background: #1f2937; color: #f9fafb; padding: 16px; border-radius: 6px; overflow-x: auto; position: relative; }
+        code { font-family: 'Monaco', 'Menlo', monospace; }
+        .code-copy-btn { position: absolute; top: 8px; right: 8px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #f9fafb; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 12px; transition: all 0.2s; }
+        .code-copy-btn:hover { background: rgba(255,255,255,0.2); }
+        .code-copy-btn.copied { background: #10b981; border-color: #10b981; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>${title}</h1>
+        <p>导出时间: ${timestamp}</p>
+    </div>
+    <div class="content">`;
+
+        conversationData.forEach((message, index) => {
+            if (message.type === 'user') {
+                html += `
+        <div class="message user">
+            <div class="message-header">👤 用户 (${index + 1})</div>
+            <div class="message-content">
+                <pre><code>${escapeHtml(message.content)}</code></pre>
+            </div>
+        </div>`;
+            } else if (message.type === 'assistant') {
+                html += `
+        <div class="message assistant">
+            <div class="message-header">🤖 AI助手 (${index + 1})</div>
+            <div class="message-content">`;
+
+                // 对于AI消息，先清理原有的复制按钮，然后使用HTML内容
+                let content = typeof message.content === 'object' ? message.content.htmlContent : escapeHtml(message.content);
+                // 移除原页面的复制按钮
+                content = content.replace(/<button[^>]*class="[^"]*hljs-copy-button[^"]*"[^>]*>.*?<\/button>/gi, '');
+                html += content;
+
+                html += `
+            </div>
+        </div>`;
+            }
+        });
+
+        html += `
+    </div>
+    <script>
+        function copyCode(button) {
+            const pre = button.parentElement;
+            const code = pre.querySelector('code');
+            const text = code ? code.textContent : pre.textContent;
+
+            navigator.clipboard.writeText(text).then(() => {
+                button.textContent = '已复制';
+                button.classList.add('copied');
+                setTimeout(() => {
+                    button.textContent = '复制';
+                    button.classList.remove('copied');
+                }, 2000);
+            }).catch(() => {
+                // 备用方案：创建临时textarea
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+
+                button.textContent = '已复制';
+                button.classList.add('copied');
+                setTimeout(() => {
+                    button.textContent = '复制';
+                    button.classList.remove('copied');
+                }, 2000);
+            });
+        }
+
+        // 为所有代码块添加复制按钮
+        document.addEventListener('DOMContentLoaded', function() {
+            const preElements = document.querySelectorAll('pre');
+            preElements.forEach(pre => {
+                const copyBtn = document.createElement('button');
+                copyBtn.className = 'code-copy-btn';
+                copyBtn.textContent = '复制';
+                copyBtn.onclick = () => copyCode(copyBtn);
+                pre.appendChild(copyBtn);
+            });
+        });
+    </script>
+</body>
+</html>`;
+
+        return html;
+    }
+
+    // HTML转义函数
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // 下载文件
+    function downloadFile(content, filename, mimeType) {
+        const blob = new Blob([content], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    // 显示导出选择对话框
+    function showExportDialog() {
+        const conversationData = extractConversationData();
+
+        if (conversationData.length === 0) {
+            alert('没有找到对话内容可以导出');
+            return;
+        }
+
+        // 切换下拉菜单显示状态
+        const exportMenu = document.querySelector('.export-menu');
+        exportMenu.classList.toggle('show');
+    }
+
+    // 执行导出
+    function performExport(format) {
+        const conversationData = extractConversationData();
+
+        if (conversationData.length === 0) {
+            alert('没有找到对话内容可以导出');
+            return;
+        }
+
+        const title = document.title || 'genspark-conversation';
+        const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+
+        if (format === 'markdown') {
+            const markdown = formatToMarkdown(conversationData);
+            const filename = `${title}_${timestamp}.md`;
+            downloadFile(markdown, filename, 'text/markdown');
+        } else if (format === 'html') {
+            const html = formatToHTML(conversationData);
+            const filename = `${title}_${timestamp}.html`;
+            downloadFile(html, filename, 'text/html');
+        }
+
+        // 隐藏菜单
+        document.querySelector('.export-menu').classList.remove('show');
     }
 
     // 提取消息文本
@@ -532,18 +862,27 @@
 
             // 点击编辑按钮的处理
             editButton.addEventListener('click', () => {
-                // 查找编辑按钮（可能是隐藏的）
-                const hiddenEditBtn = message.querySelector('.message-action-icon');
-                if (hiddenEditBtn) {
-                    hiddenEditBtn.click();
+                // >>>>>>>>>> 修改开始 <<<<<<<<<<
+                // 查找当前消息框内所有的操作图标
+                const actionIcons = message.querySelectorAll('.message-action-icon');
+
+                // 如果至少有2个图标，则点击第2个（索引为1）
+                if (actionIcons.length >= 2) {
+                    actionIcons[1].click();
+                }
+                // 兜底：如果只有一个图标，还是点击第1个，避免按钮完全失效
+                else if (actionIcons.length === 1) {
+                    console.warn('Genspark Script: 未找到第二个图标，回退点击第一个');
+                    actionIcons[0].click();
                 } else {
-                    // 如果没有找到编辑按钮，尝试让内容可编辑
+                    // 如果没有找到图标，尝试让内容可编辑（原有的备用方案）
                     const bubble = message.querySelector('.bubble');
                     if (bubble) {
                         bubble.setAttribute('contenteditable', 'true');
                         bubble.focus();
                     }
                 }
+                // >>>>>>>>>> 修改结束 <<<<<<<<<<
             });
         });
     }
@@ -767,10 +1106,27 @@
         miniNav.style.display = 'block';
 
         // 绑定控制按钮事件
+        const exportBtn = nav.querySelector('.quicknav-export');
         const refreshBtn = nav.querySelector('.quicknav-refresh');
         const toggleBtn = nav.querySelector('.quicknav-toggle');
 
+        exportBtn.addEventListener('click', showExportDialog);
         refreshBtn.addEventListener('click', updateNavigationList);
+
+        // 绑定导出选项事件
+        nav.addEventListener('click', (e) => {
+            if (e.target.classList.contains('export-option')) {
+                const format = e.target.getAttribute('data-format');
+                performExport(format);
+            }
+        });
+
+        // 点击其他地方关闭下拉菜单
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.export-dropdown')) {
+                document.querySelector('.export-menu').classList.remove('show');
+            }
+        });
 
         toggleBtn.addEventListener('click', () => {
             isCollapsed = !isCollapsed;
@@ -796,7 +1152,36 @@
             navigateToMessage('next');
         });
 
-        // 定期刷新导航列表
+        // 监听DOM变化，实时更新导航列表
+        const observer = new MutationObserver(mutations => {
+            let shouldUpdateNav = false;
+            mutations.forEach(mutation => {
+                if (mutation.type === 'childList') {
+                    mutation.addedNodes.forEach(node => {
+                        if (node.nodeType === 1) {
+                            // 检查新增的节点是否包含对话内容
+                            if (node.classList && node.classList.contains('conversation-statement')) {
+                                shouldUpdateNav = true;
+                            } else if (node.querySelector && node.querySelector('.conversation-statement')) {
+                                shouldUpdateNav = true;
+                            }
+                        }
+                    });
+                }
+            });
+
+            if (shouldUpdateNav) {
+                // 延迟更新以确保DOM完全渲染
+                setTimeout(updateNavigationList, 100);
+            }
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+
+        // 定期刷新导航列表（作为备用）
         setInterval(updateNavigationList, CONFIG.refreshInterval);
 
         // 初始更新
